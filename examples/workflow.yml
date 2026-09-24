@@ -1,0 +1,39 @@
+# Copy this to .github/workflows/mpq-inspect.yml in the repo that receives MPQ PRs.
+name: Inspect MPQ patches
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*.MPQ"
+      - "**/*.mpq"
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to inspect"
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: mpq-inspect-${{ github.event.pull_request.number || github.event.inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      # PR files as DATA only. We never execute anything from the PR.
+      - name: Checkout PR files
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', github.event.inputs.pr) }}
+          persist-credentials: false
+
+      - name: Inspect MPQ patches
+        uses: maluramichael/mpq-inspect-action@main
+        with:
+          pr-number: ${{ github.event.pull_request.number || github.event.inputs.pr }}

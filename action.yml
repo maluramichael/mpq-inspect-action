@@ -1,0 +1,110 @@
+name: "MPQ Inspect"
+description: "Open MPQ files changed in a PR and post their contents (+decoded DBC race/class combos) as a sticky Markdown comment."
+author: "Michael Malura"
+branding:
+  icon: "package"
+  color: "purple"
+
+inputs:
+  pr-number:
+    description: "PR number to inspect and comment on."
+    required: false
+    default: ${{ github.event.pull_request.number }}
+  repository:
+    description: "owner/name of the base repo (for the PR files API)."
+    required: false
+    default: ${{ github.repository }}
+  files:
+    description: "Optional explicit newline/space-separated MPQ paths. If empty, changed *.mpq files of the PR are auto-detected."
+    required: false
+    default: ""
+  max-mb:
+    description: "Skip archives larger than this many MB."
+    required: false
+    default: "10"
+  comment:
+    description: "Post/update a sticky PR comment with the report."
+    required: false
+    default: "true"
+  comment-header:
+    description: "Sticky comment identifier (so it updates in place)."
+    required: false
+    default: "mpq-inspect"
+  github-token:
+    description: "Token used for the PR files API and commenting."
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  report:
+    description: "The generated Markdown report."
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install MPQ loader
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Resolve MPQ file list
+      id: list
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.files }}" ]; then
+          printf '%s\n' ${{ inputs.files }} > /tmp/mpq_candidates.txt
+        elif [ -n "${{ inputs.pr-number }}" ]; then
+          gh api --paginate \
+            "repos/${{ inputs.repository }}/pulls/${{ inputs.pr-number }}/files" \
+            --jq '.[].filename' \
+            | grep -iE '\.mpq$' > /tmp/mpq_candidates.txt || true
+        else
+          : > /tmp/mpq_candidates.txt
+        fi
+        # keep only files present on disk and within the size guard
+        : > /tmp/mpq_ok.txt
+        while IFS= read -r f; do
+          [ -z "$f" ] && continue
+          [ -f "$f" ] || { echo "not on disk, skipping: $f"; continue; }
+          mb=$(( $(stat -c%s "$f") / 1024 / 1024 ))
+          if [ "$mb" -gt "${{ inputs.max-mb }}" ]; then
+            echo "too big (${mb} MB), skipping: $f"; continue
+          fi
+          echo "$f" >> /tmp/mpq_ok.txt
+        done < /tmp/mpq_candidates.txt
+        echo "count=$(wc -l < /tmp/mpq_ok.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+    - name: Inspect
+      id: run
+      shell: bash
+      run: |
+        set -euo pipefail
+        mapfile -t OK < /tmp/mpq_ok.txt || true
+        if [ "${#OK[@]}" -eq 0 ]; then
+          echo "_No small MPQ files to inspect (none changed, or all skipped)._" > report.md
+        else
+          python "${{ github.action_path }}/src/inspect.py" "${OK[@]}" > report.md
+        fi
+        cat report.md
+        {
+          echo "report<<__MPQ_EOF__"
+          cat report.md
+          echo "__MPQ_EOF__"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Sticky comment
+      if: ${{ inputs.comment == 'true' && inputs.pr-number != '' }}
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: ${{ inputs.comment-header }}
+        number: ${{ inputs.pr-number }}
+        path: report.md
+        GITHUB_TOKEN: ${{ inputs.github-token }}
