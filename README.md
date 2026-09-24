@@ -1,5 +1,9 @@
 # mpq-inspect-action
 
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-MPQ%20Inspect-2ea44f?logo=github)](https://github.com/marketplace/actions/mpq-inspect)
+[![Release](https://img.shields.io/github/v/release/maluramichael/mpq-inspect-action?sort=semver)](https://github.com/maluramichael/mpq-inspect-action/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A reusable GitHub Action that **opens the MPQ files changed in a pull request,
 decodes what's inside, and posts a Markdown summary as a sticky PR comment** — so
 you can review a WoW client patch without downloading and unpacking it by hand.
