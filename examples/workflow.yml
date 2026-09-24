@@ -25,14 +25,8 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      # PR files as DATA only. We never execute anything from the PR.
-      - name: Checkout PR files
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', github.event.inputs.pr) }}
-          persist-credentials: false
-
+      # No checkout needed: the action fetches only the changed MPQ blobs via
+      # the GitHub API (data only) — it never checks out or runs the PR's code.
       - name: Inspect MPQ patches
         uses: maluramichael/mpq-inspect-action@main
         with:

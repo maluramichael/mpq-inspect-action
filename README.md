@@ -38,15 +38,13 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', github.event.inputs.pr) }}
-          persist-credentials: false
       - uses: maluramichael/mpq-inspect-action@main
         with:
           pr-number: ${{ github.event.pull_request.number || github.event.inputs.pr }}
 ```
+
+No `actions/checkout` step is needed — the action fetches only the changed MPQ
+blobs through the GitHub API.
 
 Pin to `@main` for always-latest (no tag bumping), or to a release tag if you
 want to freeze a version.
@@ -83,9 +81,10 @@ manual `workflow_dispatch` runs always inspect the full PR.
 
 Fork PRs get a **read-only** token under `pull_request`, so the action couldn't
 comment. `pull_request_target` runs in the base repo's context with a writable
-token. It is safe here because the action **only reads the PR's binary MPQ as
-data and runs its own code from the base repo** — it never checks out or executes
-anything from the PR (`persist-credentials: false`, no build steps).
+token. It is safe here because the action **never checks out the PR's code**: it
+fetches only the changed `.MPQ` blobs through the GitHub contents API and parses
+them as data. Nothing from the fork is executed, so the usual "pwn request"
+surface of `pull_request_target` doesn't apply.
 
 ## Extending it
 

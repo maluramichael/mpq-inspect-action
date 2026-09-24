@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ${{ github.repository }}
   files:
-    description: "Optional explicit newline/space-separated MPQ paths. If empty, changed *.mpq files of the PR are auto-detected."
+    description: "Optional explicit newline/space-separated MPQ paths already on disk (advanced; requires your own checkout). If empty, changed *.mpq files of the PR are auto-detected and fetched via the API — no checkout needed."
     required: false
     default: ""
   max-mb:
@@ -64,7 +64,7 @@ runs:
       shell: bash
       run: pip install -r "${{ github.action_path }}/requirements.txt"
 
-    - name: Resolve MPQ file list
+    - name: Prepare MPQ files
       id: list
       shell: bash
       env:
@@ -72,37 +72,63 @@ runs:
       run: |
         set -euo pipefail
         ZERO="0000000000000000000000000000000000000000"
-        : > /tmp/mpq_candidates.txt
+        WORK="${RUNNER_TEMP:-/tmp}/mpq_in"; mkdir -p "$WORK"
+        : > /tmp/mpq_names.txt
+        : > /tmp/mpq_ok.txt
+
+        # Resolve the PR head repo + sha so we can fetch blobs from the fork
+        # WITHOUT checking out its (untrusted) code.
+        HEAD_REPO=""; HEAD_SHA=""
+        if [ -n "${{ inputs.pr-number }}" ]; then
+          read -r HEAD_REPO HEAD_SHA < <(gh api \
+            "repos/${{ inputs.repository }}/pulls/${{ inputs.pr-number }}" \
+            --jq '"\(.head.repo.full_name) \(.head.sha)"') || true
+        fi
+
+        # 1) gather candidate MPQ filenames
         if [ -n "${{ inputs.files }}" ]; then
-          # explicit list wins
-          printf '%s\n' ${{ inputs.files }} > /tmp/mpq_candidates.txt
+          printf '%s\n' ${{ inputs.files }} > /tmp/mpq_names.txt   # explicit local files
         elif [ "${{ inputs.changed-only }}" = "true" ] \
              && [ -n "${{ inputs.before-sha }}" ] && [ -n "${{ inputs.after-sha }}" ] \
-             && [ "${{ inputs.before-sha }}" != "$ZERO" ]; then
-          # incremental: only MPQs added/modified by THIS push
-          echo "Incremental compare ${{ inputs.before-sha }}...${{ inputs.after-sha }}"
-          gh api --paginate \
-            "repos/${{ inputs.repository }}/compare/${{ inputs.before-sha }}...${{ inputs.after-sha }}" \
-            --jq '.files[]? | select(.status=="added" or .status=="modified" or .status=="renamed" or .status=="changed") | .filename' \
-            | grep -iE '\.mpq$' > /tmp/mpq_candidates.txt || true
-        elif [ -n "${{ inputs.pr-number }}" ]; then
-          # first open / manual run: inspect all MPQs in the PR
-          gh api --paginate \
-            "repos/${{ inputs.repository }}/pulls/${{ inputs.pr-number }}/files" \
-            --jq '.[].filename' \
-            | grep -iE '\.mpq$' > /tmp/mpq_candidates.txt || true
-        fi
-        # keep only files present on disk and within the size guard
-        : > /tmp/mpq_ok.txt
-        while IFS= read -r f; do
-          [ -z "$f" ] && continue
-          [ -f "$f" ] || { echo "not on disk, skipping: $f"; continue; }
-          mb=$(( $(stat -c%s "$f") / 1024 / 1024 ))
-          if [ "$mb" -gt "${{ inputs.max-mb }}" ]; then
-            echo "too big (${mb} MB), skipping: $f"; continue
+             && [ "${{ inputs.before-sha }}" != "$ZERO" ] && [ -n "$HEAD_REPO" ]; then
+          echo "Incremental compare ${{ inputs.before-sha }}...${{ inputs.after-sha }} on $HEAD_REPO"
+          if gh api --paginate \
+               "repos/$HEAD_REPO/compare/${{ inputs.before-sha }}...${{ inputs.after-sha }}" \
+               --jq '.files[]? | select(.status=="added" or .status=="modified" or .status=="renamed" or .status=="changed") | .filename' \
+               > /tmp/cmp.txt 2>/tmp/cmperr.txt; then
+            grep -iE '\.mpq$' /tmp/cmp.txt > /tmp/mpq_names.txt || true
+          else
+            echo "compare failed, falling back to full PR file list:"; cat /tmp/cmperr.txt || true
+            gh api --paginate "repos/${{ inputs.repository }}/pulls/${{ inputs.pr-number }}/files" \
+              --jq '.[].filename' | grep -iE '\.mpq$' > /tmp/mpq_names.txt || true
           fi
-          echo "$f" >> /tmp/mpq_ok.txt
-        done < /tmp/mpq_candidates.txt
+        elif [ -n "${{ inputs.pr-number }}" ]; then
+          gh api --paginate "repos/${{ inputs.repository }}/pulls/${{ inputs.pr-number }}/files" \
+            --jq '.[].filename' | grep -iE '\.mpq$' > /tmp/mpq_names.txt || true
+        fi
+
+        # 2) size-guard + fetch each candidate (data only, via the contents API)
+        while IFS= read -r path; do
+          [ -z "$path" ] && continue
+          if [ -n "${{ inputs.files }}" ]; then
+            [ -f "$path" ] || { echo "not on disk, skipping: $path"; continue; }
+            mb=$(( $(stat -c%s "$path") / 1024 / 1024 ))
+            [ "$mb" -gt "${{ inputs.max-mb }}" ] && { echo "too big (${mb}MB): $path"; continue; }
+            echo "$path" >> /tmp/mpq_ok.txt
+            continue
+          fi
+          enc="${path// /%20}"
+          sz=$(gh api "repos/$HEAD_REPO/contents/$enc?ref=$HEAD_SHA" --jq '.size' 2>/dev/null || echo 0)
+          mb=$(( sz / 1024 / 1024 ))
+          if [ "$mb" -gt "${{ inputs.max-mb }}" ]; then echo "too big (${mb}MB): $path"; continue; fi
+          dest="$WORK/$path"; mkdir -p "$(dirname "$dest")"
+          if gh api "repos/$HEAD_REPO/contents/$enc?ref=$HEAD_SHA" \
+               -H "Accept: application/vnd.github.raw" > "$dest" 2>/dev/null; then
+            echo "$dest" >> /tmp/mpq_ok.txt
+          else
+            echo "download failed, skipping: $path"
+          fi
+        done < /tmp/mpq_names.txt
         echo "count=$(wc -l < /tmp/mpq_ok.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
     - name: Inspect
