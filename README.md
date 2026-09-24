@@ -62,6 +62,17 @@ want to freeze a version.
 | `comment` | `true` | post/update the sticky comment |
 | `comment-header` | `mpq-inspect` | sticky-comment identity |
 | `github-token` | `github.token` | token for the API + comment |
+| `changed-only` | `true` | on a PR update, only inspect MPQs changed by that push |
+| `before-sha` / `after-sha` | synchronize event | push range for `changed-only` |
+
+### Only re-runs when an MPQ actually changed
+
+A `pull_request` `paths` filter matches the **whole PR diff**, so once a PR
+contains an `.MPQ`, every later push (even an SQL-only fix) would re-trigger the
+workflow. With `changed-only: true` (default) the action compares just this
+push's range (`before..after`) and, if that push touched no MPQ, **posts
+nothing** — the existing comment is left as-is. The first `opened` event and
+manual `workflow_dispatch` runs always inspect the full PR.
 
 ### Output
 

@@ -34,6 +34,18 @@ inputs:
     description: "Token used for the PR files API and commenting."
     required: false
     default: ${{ github.token }}
+  changed-only:
+    description: "On a PR update (synchronize), only inspect MPQs changed by THIS push (before..after), so a follow-up push that touches no MPQ posts nothing. On the first open / manual run the whole PR is inspected."
+    required: false
+    default: "true"
+  before-sha:
+    description: "Previous head SHA of the push (defaults to the synchronize event's before). Empty on open/dispatch => full-PR inspect."
+    required: false
+    default: ${{ github.event.before }}
+  after-sha:
+    description: "New head SHA of the push (defaults to the synchronize event's after)."
+    required: false
+    default: ${{ github.event.after }}
 
 outputs:
   report:
@@ -59,15 +71,26 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
       run: |
         set -euo pipefail
+        ZERO="0000000000000000000000000000000000000000"
+        : > /tmp/mpq_candidates.txt
         if [ -n "${{ inputs.files }}" ]; then
+          # explicit list wins
           printf '%s\n' ${{ inputs.files }} > /tmp/mpq_candidates.txt
+        elif [ "${{ inputs.changed-only }}" = "true" ] \
+             && [ -n "${{ inputs.before-sha }}" ] && [ -n "${{ inputs.after-sha }}" ] \
+             && [ "${{ inputs.before-sha }}" != "$ZERO" ]; then
+          # incremental: only MPQs added/modified by THIS push
+          echo "Incremental compare ${{ inputs.before-sha }}...${{ inputs.after-sha }}"
+          gh api --paginate \
+            "repos/${{ inputs.repository }}/compare/${{ inputs.before-sha }}...${{ inputs.after-sha }}" \
+            --jq '.files[]? | select(.status=="added" or .status=="modified" or .status=="renamed" or .status=="changed") | .filename' \
+            | grep -iE '\.mpq$' > /tmp/mpq_candidates.txt || true
         elif [ -n "${{ inputs.pr-number }}" ]; then
+          # first open / manual run: inspect all MPQs in the PR
           gh api --paginate \
             "repos/${{ inputs.repository }}/pulls/${{ inputs.pr-number }}/files" \
             --jq '.[].filename' \
             | grep -iE '\.mpq$' > /tmp/mpq_candidates.txt || true
-        else
-          : > /tmp/mpq_candidates.txt
         fi
         # keep only files present on disk and within the size guard
         : > /tmp/mpq_ok.txt
@@ -101,7 +124,9 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Sticky comment
-      if: ${{ inputs.comment == 'true' && inputs.pr-number != '' }}
+      # only post when at least one MPQ was actually inspected, so a push that
+      # touches no MPQ leaves any existing comment untouched (no re-post).
+      if: ${{ inputs.comment == 'true' && inputs.pr-number != '' && steps.list.outputs.count != '0' }}
       uses: marocchino/sticky-pull-request-comment@v2
       with:
         header: ${{ inputs.comment-header }}
