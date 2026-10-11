@@ -60,7 +60,7 @@ permissions:
   pull-requests: write
 jobs:
   inspect:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: maluramichael/mpq-inspect-action@main
         with:

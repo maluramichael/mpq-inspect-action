@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   inspect:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # No checkout needed: the action fetches only the changed MPQ blobs via
       # the GitHub API (data only) — it never checks out or runs the PR's code.
