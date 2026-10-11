@@ -62,7 +62,7 @@ jobs:
   inspect:
     runs-on: ubuntu-24.04
     steps:
-      - uses: maluramichael/mpq-inspect-action@main
+      - uses: maluramichael/mpq-inspect-action@master
         with:
           pr-number: ${{ github.event.pull_request.number || github.event.inputs.pr }}
 ```
@@ -70,7 +70,7 @@ jobs:
 No `actions/checkout` step is needed: the action fetches only the changed MPQ
 blobs through the GitHub API.
 
-Pin to `@main` for always-latest (no tag bumping), or to a release tag if you
+Pin to `@master` for always-latest (no tag bumping), or to a release tag if you
 want to freeze a version.
 
 ### Inputs

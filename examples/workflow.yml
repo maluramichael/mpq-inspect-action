@@ -28,6 +28,6 @@ jobs:
       # No checkout needed: the action fetches only the changed MPQ blobs via
       # the GitHub API (data only) — it never checks out or runs the PR's code.
       - name: Inspect MPQ patches
-        uses: maluramichael/mpq-inspect-action@main
+        uses: maluramichael/mpq-inspect-action@master
         with:
           pr-number: ${{ github.event.pull_request.number || github.event.inputs.pr }}
